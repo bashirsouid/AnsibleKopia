@@ -1,1 +1,7 @@
 # AnsibleKopia
+
+As per discussion in Kopia project [Reference: https://github.com/kopia/kopia/issues/1067] people were interested in Ansible scripts that set up repositories, backups, health-checks, etc. so I forked a copy of the setup scripts I use to setup kopia role from my main Ansible configurations.
+
+I made it to my use case (which is how I usually treat Ansible, instead of build for universe and support 10 operating systems, etc.). But it's been perfect for me because I have it backup to both cloud backups (off-site backups) and removable drives (onsite backups) in same job but it doesn't fail if the removable drives are not plugged in because I don't want to always have them attached when running Ansible (I'm lazy). It also sets up a Kopia user with read-only access to locations and runs periodically backups so if I don't run my Ansible setup job for a few days I still get backups. But it's less obvious the backup succeeded when it's a different user. So that's one of the reasons why it backups up when the Ansible setup job runs itself interactively. And I have it push a health check notification to healthchecks site so if it doesn't backup for few days I get a page to pagerduty.
+
+So yeah, that's a long explanation... But that's kinda why I write my Ansible scripts for myself: because I like to customize it for my use case with all the behavior I need. Sometimes I copy something from Ansible Galaxy as a starting point but then always customize it for my use case again.
