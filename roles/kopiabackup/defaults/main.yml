@@ -1,0 +1,56 @@
+---
+
+kopia_user: kopia
+kopia_group: kopia
+kopia_user_additional_groups:
+  - archivereaders
+kopia_user_home: /home/kopia
+kopia_config_path: /home/kopia/.config/kopia/
+kopia_service_script_file: /home/kopia/kopia.script
+  
+kopia_backup_sources:
+  - /mnt/data
+  - /mnt/archive
+
+kopia_backup_excludes:
+  - ".git/"
+  - "node_modules/"
+  - ".trash/"
+  - ".ssh/"
+  - ".dtrash/"
+  - "*.cache"
+  - "*.backup"
+  - "*.bak"
+  - "*.orig"
+  - ".bash_history"
+  - ".netrc"
+  - ".atom-socket*"
+
+kopia_backup_retention_hourly: 0
+kopia_backup_retention_daily:  90
+kopia_backup_retention_weekly:  0
+kopia_backup_retention_monthly: 0
+kopia_backup_retention_annual: 0
+
+kopia_backup_s3_destinations:
+  - name: backblaze
+    description: Personal offsite cloud backup to Backblaze
+    type: s3
+    cache: /mnt/data/backup.kopia.backblaze.cache
+    bucket: bucket-name
+    endpoint: s3.us-west-002.backblazeb2.com
+    accesskey: 00000
+    secretaccesskey: "{{kopia_backblaze_secret}}"
+    config: "{{kopia_config_path}}repository.backblaze.s3.config"
+    passcode: "{{kopia_backblaze_passcode}}"
+    precondition: "true"
+
+kopia_backup_filesystem_destinations:
+  - name: seagate
+    description: Personal onsite backup to seagate data drive
+    type: filesystem
+    path: /mnt/seagate/backup.kopia/
+    cache: /mnt/data/backup.kopia.seagate.cache
+    config: "{{kopia_config_path}}repository.seagate.filesystem.config"
+    passcode: "{{kopia_seagate_passcode}}"
+    precondition: "mountpoint -q /mnt/seagate/" # check that external drive is mounted

@@ -1,0 +1,23 @@
+{
+  "storage": {
+    "type": "filesystem",
+    "config": {
+      "path": "{{item.path}}",
+      "fileMode": 384,
+      "dirMode": 448,
+      "dirShards": null
+    }
+  },
+  "caching": {
+    "cacheDirectory": "{{item.cache}}",
+    "maxCacheSize": 5242880000,
+    "maxMetadataCacheSize": 5242880000,
+    "maxListCacheDuration": 30
+  },
+  "hostname": "{{inventory_hostname}}",
+  "username": "{{kopia_user}}",
+  "description": "{{item.description}}",
+  "enableActions": false,
+  "formatBlobCacheDuration": 900000000000
+}
+

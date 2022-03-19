@@ -1,0 +1,24 @@
+{
+  "storage": {
+    "type": "s3",
+    "config": {
+      "bucket": "{{item.bucket}}",
+      "endpoint": "{{item.endpoint}}",
+      "accessKeyID": "{{item.accesskey}}",
+      "secretAccessKey": "{{item.secretaccesskey}}",
+      "sessionToken": ""
+    }
+  },
+  "caching": {
+    "cacheDirectory": "{{item.cache}}",
+    "maxCacheSize": 5242880000,
+    "maxMetadataCacheSize": 5242880000,
+    "maxListCacheDuration": 30
+  },
+  "hostname": "{{inventory_hostname}}",
+  "username": "{{kopia_user}}",
+  "description": "{{item.description}}",
+  "enableActions": false,
+  "formatBlobCacheDuration": 900000000000
+}
+

@@ -1,0 +1,276 @@
+---
+
+- name: Upsert healthchecks for backup to filesystem(s)
+  uri:
+    url: "https://hc-ping.com/api/v1/checks/"
+    method: POST
+    headers:
+      X-Api-Key: "{{ healthcheck.apiTokens.backup }}"
+    body_format: json
+    body:
+      name: "Backup Healthcheck {{ inventory_hostname }}:{{item.0}} to {{item.1.type}}:{{item.1.name}}"
+      tags: "backup upload kopia {{ inventory_hostname }} {{item.1.name}} {{item.1.type}}"
+      desc: "A reoccuring kopia backup job for host {{ inventory_hostname }} and directory {{item.0}} to {{item.1.path}}."
+      timeout: 3600
+      grace: 7200
+      channels: "*"
+      unique:
+        - "name"
+        - "tags"
+    return_content: yes
+  register: _create_check_backup_result
+  failed_when: _create_check_backup_result.status != 200 and _create_check_backup_result.status != 201
+  changed_when: _create_check_backup_result.status == 201
+  loop: "{{ kopia_backup_sources|product(kopia_backup_filesystem_destinations)|list }}"
+  no_log: true
+  loop_control:
+    label: "{{ item.1.name }}"
+
+- name: Upsert healthchecks for backup to S3 bucket(s)
+  uri:
+    url: "https://hc-ping.com/api/v1/checks/"
+    method: POST
+    headers:
+      X-Api-Key: "{{ healthcheck.apiTokens.backup }}"
+    body_format: json
+    body:
+      name: "Backup Healthcheck {{ inventory_hostname }}:{{item.0}} to {{item.1.type}}:{{item.1.name}}"
+      tags: "backup upload kopia {{ inventory_hostname }} {{item.1.name}} {{item.1.type}}"
+      desc: "A reoccuring kopia backup job for host {{ inventory_hostname }} and directory {{item.0}} to {{item.1.type}}:{{item.1.bucket}}."
+      timeout: 3600
+      grace: 7200
+      channels: "*"
+      unique:
+        - "name"
+        - "tags"
+    return_content: yes
+  register: _create_check_backup_result
+  failed_when: _create_check_backup_result.status != 200 and _create_check_backup_result.status != 201
+  changed_when: _create_check_backup_result.status == 201
+  loop: "{{ kopia_backup_sources|product(kopia_backup_s3_destinations)|list }}"
+  no_log: true
+  loop_control:
+    label: "{{ item.1.name }}"
+
+- name: Install prerequisites
+  apt:
+    name:
+      - kopia
+    state: present
+  become: true
+
+- name: Create the user group
+  group:
+    name: "{{ kopia_group }}"
+    system: true
+    state: present
+
+- name: Create the user
+  user:
+    name: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    home: "{{ kopia_user_home }}"
+    shell: "/usr/bin/bash"
+    system: yes
+
+- name: Adding kopia user to additional groups
+  user:
+    name: '{{ kopia_user }}'
+    groups: '{{item}}'
+    append: yes
+  loop: '{{ kopia_user_additional_groups }}'
+
+- name: Make sure the kopia config directory exists
+  file:
+    dest: "{{ kopia_config_path }}"
+    state: directory
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0740
+
+- name: Create the kopia filesystem repositories to initialize the directory tree
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.precondition }} && ! test -f "{{item.path}}/kopia.repository.f"; then
+      kopia repository create filesystem --path={{item.path}} 
+    fi
+  loop: "{{ kopia_backup_filesystem_destinations }}"
+  environment:
+    KOPIA_PASSWORD: "{{item.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create the main kopia configuration file(s) for filesystem destinations
+  template:
+    src: kopia.filesystem.config.j2
+    dest: "{{ item.config }}"
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0640
+  loop: "{{ kopia_backup_filesystem_destinations }}"
+  no_log: true
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create the main kopia configuration file(s) for s3 destinations
+  template:
+    src: kopia.s3.config.j2
+    dest: "{{ item.config }}"
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0640
+  loop: "{{ kopia_backup_s3_destinations }}"
+  no_log: true
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Make sure the kopia destination directories exist
+  file:
+    dest: "{{ item.path }}"
+    state: directory
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0740
+  loop: "{{ kopia_backup_filesystem_destinations }}"
+  no_log: true
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Set global policies for all filesystem kopia backup(s)
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.precondition }}; then
+      kopia policy set --global --config-file={{item.config}} --compression zstd 
+      kopia policy set --global --config-file={{item.config}} --add-dot-ignore nobackup 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_hourly}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_daily}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_weekly}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_monthly}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_annual}} 
+    fi
+  loop: "{{kopia_backup_filesystem_destinations}}"
+  environment:
+    KOPIA_PASSWORD: "{{item.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Add global ignore policies for all filesystem backups
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.0.precondition }}; then
+      kopia policy set --global --config-file={{item.0.config}} --add-ignore {{item.1}} 
+    fi
+  loop: "{{ kopia_backup_filesystem_destinations|product(kopia_backup_excludes)|list }}"
+  environment:
+    KOPIA_PASSWORD: "{{item.0.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.0.name }}"
+
+- name: Set global policies for all s3 kopia backup(s)
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.precondition }}; then
+      kopia policy set --global --config-file={{item.config}} --compression zstd 
+      kopia policy set --global --config-file={{item.config}} --add-dot-ignore nobackup 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_hourly}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_daily}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_weekly}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_monthly}} 
+      kopia policy set --global --config-file={{item.config}} --keep-annual {{kopia_backup_retention_annual}} 
+    fi
+  loop: "{{kopia_backup_s3_destinations}}"
+  environment:
+    KOPIA_PASSWORD: "{{item.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Add global ignore policies for all s3 backups
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.0.precondition }}; then
+      kopia policy set --global --config-file={{item.0.config}} --add-ignore {{item.1}} 
+    fi
+  loop: "{{ kopia_backup_s3_destinations|product(kopia_backup_excludes)|list }}"
+  environment:
+    KOPIA_PASSWORD: "{{item.0.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.0.name }}"
+
+- name: Register and snapshot backup source(s) for all filesystem kopia backup(s)
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.0.precondition }}; then
+      kopia snapshot --config-file={{item.0.config}} {{item.1}} 
+    fi
+  loop: "{{ kopia_backup_filesystem_destinations|product(kopia_backup_sources)|list }}"
+  environment:
+    KOPIA_PASSWORD: "{{item.0.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.0.name }}"
+
+- name: Register and snapshot backup source(s) for all s3 kopia backup(s)
+  become_user: "{{ kopia_user }}"
+  shell: |
+    if {{ item.0.precondition }}; then
+      kopia snapshot --config-file={{item.0.config}} {{item.1}} 
+    fi
+  loop: "{{ kopia_backup_s3_destinations|product(kopia_backup_sources)|list }}"
+  environment:
+    KOPIA_PASSWORD: "{{item.0.passcode}}"
+  no_log: true
+  loop_control:
+    label: "{{ item.0.name }}"
+
+- name: Create the kopia backup to s3 execution script
+  template:
+    src: kopia.s3.bash.j2
+    dest: "{{ kopia_user_home }}/kopia.s3.bash"
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0740
+
+- name: Create the kopia backup to filesystem execution script
+  template:
+    src: kopia.filesystem.bash.j2
+    dest: "{{ kopia_user_home }}/kopia.filesystem.bash"
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0740
+
+- name: Create kopia service files and timer files
+  template:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item | replace('.j2', '') }}"
+    owner: "{{ kopia_user }}"
+    group: "{{ kopia_group }}"
+    mode: 0640
+  loop:
+    - kopia.service.j2
+    - kopia.timer.j2
+
+- name: Reload systemctl daemon
+  ansible.builtin.systemd:
+    daemon_reexec: yes
+
+- name: Enable (without starting) kopia services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: yes
+  loop:
+    - kopia.service
+
+- name: Enable and start kopia timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+    no_block: yes
+  loop:
+    - kopia.timer
+  
